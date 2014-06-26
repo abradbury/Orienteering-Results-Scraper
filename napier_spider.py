@@ -12,7 +12,8 @@ from tutorial.items import ResultItem, CourseItem
 # TODO: Somewhere have a check to determine which spider to use
 # TODO: Convert time to appropriate representation
 # TODO: Try to match 'E-card XXXXXX' to a competitor
-# TODO: Handle 'out of order' controls
+# TODO: Handle 'out of order' controls and prevent assignment to name
+# TODO: '&amp;' being skipped, stop this
 # TODO: Handle different units for course length and climb
 # 
 # @author: abradbury
@@ -22,9 +23,7 @@ class NapierSpider(Spider):
     start_urls = [
         # "http://www.southyorkshireorienteers.org.uk/event/2013-03-10-rivelin-valley/results.htm",
         # "http://www.southyorkshireorienteers.org.uk/event/2013-12-15-canklow-woods/results.htm"
-        "file:///Users/Adam/Downloads/Results%20for%20Saturday%20Series%203,%20Millhouses,%2011:05:2013.html"
-        # "file:///Users/Adam/Downloads/Results%20for%20SYO,%20Rivelin,%2010:03:2013.html"
-        # "http://www.southyorkshireorienteers.org.uk/event/2013-05-11-millhouses-park/results_v2.htm"
+        "http://www.southyorkshireorienteers.org.uk/event/2013-05-11-millhouses-park/results_v2.htm"
     ]
 
     # Checks if a parsed element is an age class e.g W12 or M50 (women's 12 or 
@@ -43,7 +42,7 @@ class NapierSpider(Spider):
         return result
     
 
-    # Identifies
+    # Identifies the element in a row
     # 
     # @param    row                 The row to analyse
     # @param    previousPosition    The previous competitor's position
@@ -52,15 +51,19 @@ class NapierSpider(Spider):
         missingFlag = False     # True when the competitor has missed controls
         ecardFlag = False       # True when the competitor details are unknown
 
+        print row
+
         # Iterate over row elements
         for i, element in enumerate(row):
             # Match the numerical elements such as position and missed controls
-            if element.rstrip('=').isdigit():
+            if element.rstrip('=;').isdigit():
                 if i == 0:                          # Position
                     item['position'] = int(element.rstrip('='))
                     item['status'] = 'ok'
                 elif missingFlag:                   # Missed controls
-                    item['missed'] = [int(element)]
+                    if ';' in element:
+                        missingFlag = False
+                    item['missed'] = [int(element.rstrip(';'))]
                 elif ecardFlag:                     # E-card number
                     item['name'] = "E-card " + element
                     ecardFlag = False
@@ -79,6 +82,8 @@ class NapierSpider(Spider):
                     item['status'] = 'dns'
                 elif element == 'E-card':           # E-card (unknown competitor)
                     ecardFlag = True
+                elif ';' in element:
+                    missingFlag = False;
                 else:                               # Name
                     try:
                         item['name'] += " " + element
@@ -192,6 +197,6 @@ class NapierSpider(Spider):
         # Print the course details
         print 'Number of courses: ' + str(len(courses))
         for course in courses:
-            print course['uid'], course['name'], course['length'], course['climb'], course['controls']
+            print course.get('uid'), course.get('name'), course.get('length'), course.get('climb'), course.get('controls')
         
         return items
