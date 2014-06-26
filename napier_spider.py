@@ -125,7 +125,7 @@ class NapierSpider(Spider):
     
 
     # The main method to parse the results on a web page
-    # ---DETAILS--
+    # ---ADD DETAILS--
     #
     # @param    response    ??
     # @return               A list of parsed objects?
