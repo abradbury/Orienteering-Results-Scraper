@@ -1,8 +1,8 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# To ignore numpy errors and docstrings:
-#     pylint: disable=E1101,C0111
+# To ignore numpy missing docstrings and too many ancestors warnings:
+#     pylint: disable=C0111,R0901
 
 # Define here the models for your scraped items
 #
@@ -11,30 +11,36 @@
 
 from scrapy.item import Item, Field
 
-class ResultItem(Item):
-    position = Field()
+class PersonItem(Item):
     name = Field()
     club = Field()
     ageClass = Field()
+    result = Field()
+    course = Field()
+    event = Field()
+    venue = Field()
+
+class ResultItem(Item):
+    position = Field()
     time = Field()
-    courseID = Field()
+    course = Field()
     status = Field()
     missed = Field()
     out_of_order = Field()
 
-    #TODO: replace with a better method that doesn't hardcode the attribute values
-    def field_names_to_list(self):
-        return ['position', 'name', 'club', 'ageClass', 'time', 'courseID', 'status', 'missed', 'out_of_order']
-
-    def fields_to_list(self):
-        return [self.get('position'), self.get('name'), self.get('club'), self.get('ageClass'), self.get('time'), self.get('courseID'), self.get('status'), self.get('missed'), self.get('out_of_order')]
-
-
 class CourseItem(Item):
-    uid = Field()
     name = Field()
     length = Field()
     climb = Field()
     controls = Field()
-    competitors = Field()
+
+class VenueItem(Item):
+    name = Field()
+    location = Field()
+
+class EventItem(Item):
+    name = Field()
+    level = Field()
+    category = Field()
+    date = Field()
     

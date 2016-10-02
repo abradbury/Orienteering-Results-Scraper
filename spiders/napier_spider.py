@@ -11,7 +11,7 @@ import datetime # For storing time information
 from scrapy.spiders import Spider
 from scrapy.selector import Selector
 
-from Orienteering_Scraper.items import ResultItem, CourseItem
+from Orienteering_Scraper.items import ResultItem, CourseItem, PersonItem, EventItem, VenueItem
 
 # Parses output from Michael Napier's software, namely COLOUR and MERCS
 #
@@ -43,52 +43,63 @@ class NapierSpider(Spider):
         # Change the below to //a name = xxx to get both course and competitor info
         results = hxs.xpath('//a[@name]')
 
+        raw_event_info = hxs.xpath('//a[@name="TOP"]/p/strong/text()')
+        event_info, venue_info = self.parse_event_info(raw_event_info)
+
         items = []      # Each result
-        courses = []    # A list of all courses for the event
-        course_id = 1   # A unique ID for each course
+        # courses = []    # A list of all courses for the event
 
         # Set up the CSV output and write the header row
-        with open('output.csv', 'wb') as csvfile:
-            output = csv.writer(csvfile)
-            header_item = ResultItem()
-            output.writerow(header_item.field_names_to_list())
+        # with open('output.csv', 'wb') as csvfile:
+            # output = csv.writer(csvfile)
+            # header_item = ResultItem()
+            # output.writerow(header_item.field_names_to_list())
 
-            # Iterate over each set of course results e.g. white results, yellow results etc.
-            for course in results:
-                course_header = course.xpath('p')[0]
+        # Iterate over each set of course results e.g. white results, yellow results etc.
+        for course in results:
+            course_header = course.xpath('p')[0]
 
-                if len(course_header.xpath('text()').extract()) > 0:
-                    course_info = self.parse_course_info(course_header, course_id)
-                    parsed_results, count = self.parse_course_results(course, course_id)
+            if len(course_header.xpath('text()').extract()) > 0:
+                course_info = self.parse_course_info(course_header)
+                parsed_results = self.parse_course_results(course, course_info, venue_info, event_info)
 
-                    course_info['competitors'] = count
+                items.extend(parsed_results)
+                # courses.append(course_info)
 
-                    items.extend(parsed_results)
-                    courses.append(course_info)
+                # for parsed_result in parsed_results:
+                #     output.writerow(parsed_result.fields_to_list())
 
-                    course_id += 1
-                    for parsed_result in parsed_results:
-                        output.writerow(parsed_result.fields_to_list())
-
-            # Print the course details
-            print 'Number of courses: ' + str(len(courses))
-            for course in courses:
-                print course.get('uid'), course.get('name'), course.get('length'), \
-                course.get('climb'), course.get('controls'), course.get('competitors')
+        # Print the course details
+        # print 'Number of courses: ' + str(len(courses))
+        # for course in courses:
+        #     print course.get('uid'), course.get('name'), course.get('length'), \
+        #     course.get('climb'), course.get('controls'), course.get('competitors')
 
         return items
+
+    def parse_event_info(self, event_info):
+        event = EventItem()
+        venue = VenueItem()
+
+        split_event_info = event_info.extract()[0].split(', ')
+
+        event['date'] = split_event_info[-1]
+        event['name'] = split_event_info[0].replace('Results for ', '')
+
+        venue['name'] = split_event_info[1]
+
+        return event, venue
 
 
     # Something
     #
     # @param    course      m
-    # @param    course_id   m
+    # @param    course_info m
     # @return               m
-    def parse_course_results(self, course, course_id):
+    def parse_course_results(self, course, course_info, venue_info, event_info):
         # Parse and store each competitor's result
         course_results = course.xpath('pre').extract()[0].splitlines()
         parsed_results = []
-        competitor_count = 0
 
         for result in course_results:
             split_row = result.split()
@@ -96,27 +107,27 @@ class NapierSpider(Spider):
             # Try to filter out irrelavent rows, e.g. 'green men's standard'
             if (len(split_row) > 2) and ('<i>' not in split_row[0]):
                 parsed_result = self.parse_result_row(result)
-                parsed_result['courseID'] = course_id
+                parsed_result['course'] = dict(course_info)
+                parsed_result['venue'] = dict(venue_info)
+                parsed_result['event'] = dict(event_info)
                 parsed_results.append(parsed_result)
-                competitor_count += 1
 
-                print parsed_result
+                print "Raw: '" + str(result) + "'"
+                print "Parsed: " + str(parsed_result)
                 print
 
-        return parsed_results, competitor_count
+        return parsed_results
 
 
     # Extracts the course information (such as name, length etc.)
     #
     # @param    course_header   m
-    # @param    course_id       m
     # @return                   m
     @staticmethod
-    def parse_course_info(course_header, course_id):
+    def parse_course_info(course_header):
         course_details = CourseItem()
 
         course_details['name'] = (course_header.xpath('strong/text()').extract())[0]
-        course_details['uid'] = course_id
 
         raw_course_details = course_header.xpath('text()').extract()[0].strip().split(', ')
 
@@ -128,9 +139,10 @@ class NapierSpider(Spider):
             elif 'controls' in course_descriptor:
                 course_details['controls'] = int(course_descriptor.split(' ')[0])
 
-        print '+++++Parsed Details+++++'
-        print '\'' + course_details['name'] + '\''
-        print course_details
+        print '-----------------------------------------------------------------------------------'
+        print 'Course name: \'' + course_details['name'] + '\''
+        print 'Course details: \'' + str(course_details) + '\''
+        print
 
         return course_details
 
@@ -153,16 +165,19 @@ class NapierSpider(Spider):
 
 
     # Identifies the element in a row
+    # TODO: Separate person and result item parsing into two methods
     #
     # @param    row                 The row to analyse
     @staticmethod
     def parse_result_row(raw_row):
-        item = ResultItem()
+        person = PersonItem()
+        result = ResultItem()
+
         missing_flag = False     # True when the competitor has missed controls
         ecard_flag = False       # True when the competitor details are unknown
 
         if "out of order" in raw_row:
-            item['out_of_order'] = int(raw_row.split("out of order")[0].strip().split()[-1])
+            result['out_of_order'] = int(raw_row.split("out of order")[0].strip().split()[-1])
             raw_row = raw_row.replace("out of order", "")
 
         split_row = raw_row.split()
@@ -172,46 +187,46 @@ class NapierSpider(Spider):
             # Match the numerical elements such as position and missed controls
             if element.rstrip('=;').isdigit():
                 if i == 0:                          # Position
-                    item['position'] = int(element.rstrip('='))
-                    item['status'] = 'ok'
+                    result['position'] = int(element.rstrip('='))
+                    result['status'] = 'ok'
                 elif missing_flag:                   # Missed controls
                     if ';' in element:
                         missing_flag = False
-                    item['missed'] = [int(element.rstrip(';'))]
+                    result['missed'] = [int(element.rstrip(';'))]
                 elif ecard_flag:                     # E-card number
-                    item['name'] = "E-card " + element
+                    person['name'] = "E-card " + element
                     ecard_flag = False
 
             # Match the characters to name, club and status flags
             elif re.match("^[a-zA-Z-\']+$", element.rstrip(',')) and not missing_flag:
                 if element.isupper():               # Club
-                    item['club'] = element
+                    person['club'] = element
                 elif element == "Missing":          # Missing controls
                     missing_flag = True
                 elif i == 0 and element == "mp":    # MP (Miss-Punched)
-                    item['status'] = 'mp'
+                    result['status'] = 'mp'
                 elif element == "rtd":              # RTD (Retired)
-                    item['status'] = 'rtd'
+                    result['status'] = 'rtd'
                 elif element == "dns":              # DNS (Did not start)
-                    item['status'] = 'dns'
+                    result['status'] = 'dns'
                 elif element == 'E-card':           # E-card (unknown competitor)
                     ecard_flag = True
                 elif ';' in element:
                     missing_flag = False
                 else:                               # Name
                     try:
-                        item['name'] += " " + element
+                        person['name'] += " " + element
                     except KeyError:
-                        item['name'] = element
+                        person['name'] = element
 
             elif missing_flag and "no" not in element:
-                item['missed'] = NapierSpider.parse_missed_controls(element)
+                result['missed'] = NapierSpider.parse_missed_controls(element)
 
             elif element == "n/c":                  # N/C (Non-Competitive)
-                item['status'] = 'n/c'
+                result['status'] = 'n/c'
 
             elif NapierSpider.is_age_class(element):# Age class (M/W number)
-                item['ageClass'] = element
+                person['ageClass'] = element
 
             elif ':' in element:                    # Time
                 time_parts = element.split(':')
@@ -219,9 +234,11 @@ class NapierSpider(Spider):
                 hours = full_minutes / 60
                 minutes = full_minutes % 60
                 seconds = int(time_parts[1])
-                item['time'] = datetime.time(hours, minutes, seconds).isoformat()
+                result['time'] = datetime.time(hours, minutes, seconds).isoformat()
 
-        return item
+        person['result'] = dict(result)
+
+        return person
 
 
     # Parses the missed controls numbers from a string such as '1,4-6' to
