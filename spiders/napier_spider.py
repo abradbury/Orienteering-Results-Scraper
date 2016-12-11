@@ -26,6 +26,9 @@ class NapierSpider(scrapy.Spider):
     allowed_domains = ["www.southyorkshireorienteers.org.uk"]
     start_urls = ["https://www.southyorkshireorienteers.org.uk/results"]
 
+    discovered_events_count = 0
+    processed_events_count = 0
+
     def parse(self, response):
         """The main entry into the parsing process, starts at the results page
         of an orienteering website and works through the results pages,
@@ -57,12 +60,12 @@ class NapierSpider(scrapy.Spider):
         the link to the evens results page. Currently, only local event
         result pages are parsed."""
 
+        self.discovered_events_count += 1
         event_title = response.url.\
             replace("https://www.southyorkshireorienteers.org.uk/events/" +
                     "event/", "").split('/')[0]
 
-        # From an event's page, get the link to its results and send for
-        # parsing
+        # From an event's page, get the link to its results & send for parsing
         event_results = response.css(
             'dl.event_info dd.custom4 a::attr(href)').extract_first()
         if event_results is not None:
@@ -186,6 +189,8 @@ class NapierSpider(scrapy.Spider):
         #     print course.get('uid'), course.get('name'), \
         #         course.get('length'), course.get('climb'), \
         #         course.get('controls'), course.get('competitors')
+
+        self.processed_events_count += 1
 
         return items
 
@@ -370,3 +375,9 @@ class NapierSpider(scrapy.Spider):
             else:
                 missing += [int(split_group[0])]
         return missing
+
+    def closed(self, reason):
+        print "{:d}% of events processed ({:d} of {:d})"\
+            .format(int((self.processed_events_count /
+                    float(self.discovered_events_count)) * 100),
+                    self.processed_events_count, self.discovered_events_count)
