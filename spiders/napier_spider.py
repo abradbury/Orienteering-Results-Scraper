@@ -78,13 +78,13 @@ class NapierSpider(scrapy.Spider):
                                          callback=self.parse_result)
                 else:
                     NapierSpider.print_parsing(event_title)
-                    print "\t" + str(file_type.upper()) + " not supported"
+                    print "\t--" + str(file_type.upper()) + " not supported"
             else:
                 NapierSpider.print_parsing(event_title)
-                print "\tNot following external link '" + event_results + "'"
+                print "\t--Not following external link '" + event_results + "'"
         else:
             NapierSpider.print_parsing(event_title)
-            print "\tNo results link found"
+            print "\t--No results link found"
 
     @staticmethod
     def print_header(text):
@@ -99,33 +99,36 @@ class NapierSpider(scrapy.Spider):
     def parse_result(self, response):
         """Parses and identifies the type of the event results pages"""
 
-        NapierSpider.print_parsing(response.meta['event_title'])
         results_format = self.identify_results_page(response)
 
         if "Napier - Colour" in results_format:
+            NapierSpider.print_parsing(response.meta['event_title'])
             self.parse_napier_traditional(response)
         elif "MERCS" in results_format:
             text = response.css("::text").extract()
             if "Relay" in text or "relay" in text:
-                print "\tMERCS relay events not yet supported"
+                NapierSpider.print_parsing(response.meta['event_title'])
+                print "\t--MERCS relay events not yet supported"
             # elif ???
-            #     print "\tMERCS multi-day events not yet supported"
+            #     print "\t--MERCS multi-day events not yet supported"
             # elif ???
-            #     print "\tMERCS class-split event results not supported"
+            #     print "\t--MERCS class-split event results not supported"
             else:
                 links = response.css("p a::attr(href)").extract()
                 if "results.htm" in links:
                     mercs_result_page = links[links.index("results.htm")]
-                    print "\tMERCS simple event results found"
+                    # print "\tMERCS simple event results found"
                     yield scrapy.Request(response.urljoin(mercs_result_page),
                                          meta={'event_title':
                                          response.meta['event_title']},
                                          callback=self.parse_result)
                 else:
-                    print "\tMERCS no results link found"
+                    NapierSpider.print_parsing(response.meta['event_title'])
+                    print "\t--MERCS no results link found"
 
         else:
-            print "\tUnsupported results format: " + results_format
+            NapierSpider.print_parsing(response.meta['event_title'])
+            print "\t--Unsupported results format: " + results_format
 
     @staticmethod
     def identify_results_page(response):
@@ -189,8 +192,14 @@ class NapierSpider(scrapy.Spider):
         #     print course.get('uid'), course.get('name'), \
         #         course.get('length'), course.get('climb'), \
         #         course.get('controls'), course.get('competitors')
+                 
+        if (len(items) == 0):
+            print "\t**No results detected - investigate parser**"
 
         self.processed_events_count += 1
+        print "\t++ Found {:d} results over {:d} courses ({:s})"\
+            .format(len(items), len(results) - 1, event_info['name'])
+        # TODO: Why len - 1 for results?
 
         return items
 
