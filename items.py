@@ -43,4 +43,5 @@ class EventItem(Item):
     level = Field()
     category = Field()
     date = Field()
+    url = Field()
     

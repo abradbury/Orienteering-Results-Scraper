@@ -22,10 +22,10 @@ ITEM_PIPELINES = {
     'Orienteering_Scraper.pipelines.MongoPipeline': 300
 }
 
-MONGO_DATABASE = 'orienteering'
+MONGO_DATABASE = 'Orienteering'
 MONGO_URI = 'mongodb://localhost:27017'
 
-LOG_LEVEL = 'INFO'
+LOG_LEVEL = 'ERROR'
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
 #USER_AGENT = 'Orienteering_Scraper (+http://www.yourdomain.com)'

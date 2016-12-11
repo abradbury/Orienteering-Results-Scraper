@@ -13,7 +13,7 @@ from pymongo import MongoClient
 # From http://doc.scrapy.org/en/latest/topics/item-pipeline.html#write-items-to-mongodb
 class MongoPipeline(object):
 
-    collection_name = 'dataset'
+    collection_name = 'results'
 
     def __init__(self, mongo_uri, mongo_db):
         self.mongo_uri = mongo_uri
