@@ -150,14 +150,13 @@ class NapierSpider(scrapy.Spider):
 
     def parse_napier_traditional(self, response):
         # TODO: Ignore score courses that can be mixed up in the results
-        hxs = scrapy.Selector(response)
 
         # Select all the links that have an attribute 'name' - course headers
         # Change the below to //a name = xxx to get course & competitor info
-        results = hxs.xpath('//a[@name]')
+        courses = response.css('a:not([name=TOP])[name]')
 
-        raw_event_info = hxs.xpath('//a[@name="TOP"]/p/strong/text()')
-        event_info, venue_info = self.parse_event_info(
+        raw_event_info = response.css('a[name=TOP] p strong::text')
+        event_info, venue_info = NapierSpider.parse_event_info(
             raw_event_info, response)
 
         items = []      # Each result
@@ -170,11 +169,9 @@ class NapierSpider(scrapy.Spider):
         # output.writerow(header_item.field_names_to_list())
 
         # Iterate over each set of course results e.g. white results
-        for course in results:
-            course_header = course.xpath('p')[0]
-
-            if len(course_header.xpath('text()').extract()) > 0:
-                course_info = self.parse_course_info(course_header)
+        for course in courses:
+            if course.css('p::text').extract_first():
+                course_info = self.parse_course_info(course)
                 parsed_results = self.parse_course_results(course,
                                                            course_info,
                                                            venue_info,
@@ -192,14 +189,13 @@ class NapierSpider(scrapy.Spider):
         #     print course.get('uid'), course.get('name'), \
         #         course.get('length'), course.get('climb'), \
         #         course.get('controls'), course.get('competitors')
-                 
+
         if (len(items) == 0):
             print "\t**No results detected - investigate parser**"
 
         self.processed_events_count += 1
         print "\t++ Found {:d} results over {:d} courses ({:s})"\
-            .format(len(items), len(results) - 1, event_info['name'])
-        # TODO: Why len - 1 for results?
+            .format(len(items), len(courses), event_info['name'])
 
         return items
 
@@ -208,7 +204,7 @@ class NapierSpider(scrapy.Spider):
         event = EventItem()
         venue = VenueItem()
 
-        split_event_info = event_info.extract()[0].split(', ')
+        split_event_info = event_info.extract_first().split(', ')
 
         event['date'] = split_event_info[-1]
         event['name'] = split_event_info[0].replace('Results for ', '')
@@ -220,7 +216,7 @@ class NapierSpider(scrapy.Spider):
 
     def parse_course_results(self, course, course_info, venue_info, event_info):
         # Parse and store each competitor's result
-        course_results = course.xpath('pre').extract()[0].splitlines()
+        course_results = course.css('pre').extract_first().splitlines()
         parsed_results = []
 
         for result in course_results:
@@ -242,34 +238,33 @@ class NapierSpider(scrapy.Spider):
 
     # Extracts the course information (such as name, length etc.)
     #
-    # @param    course_header   m
+    # @param    raw_course   m
     # @return                   m
     @staticmethod
-    def parse_course_info(course_header):
-        course_details = CourseItem()
+    def parse_course_info(raw_course):
+        course = CourseItem()
 
-        course_details['name'] = (course_header.xpath('strong/text()')
-                                  .extract())[0]
+        course['name'] = raw_course.css('p strong::text').extract_first()
 
-        raw_course_details = course_header.xpath('text()').extract()[0]
-        stripped_course_detailed = raw_course_details.strip().replace('(', '')\
+        course_text = raw_course.css('p::text').extract_first()
+        stripped_course_detailed = course_text.strip().replace('(', '')\
             .replace(')', '').split(', ')
 
         for course_descriptor in stripped_course_detailed:
             if 'length' in course_descriptor:
-                course_details['length'] = course_descriptor.split(' ')[1]
+                course['length'] = course_descriptor.split(' ')[1]
             elif 'climb' in course_descriptor:
-                course_details['climb'] = course_descriptor.split(' ')[1]
+                course['climb'] = course_descriptor.split(' ')[1]
             elif 'controls' in course_descriptor:
-                course_details['controls'] = int(
+                course['controls'] = int(
                     course_descriptor.split(' ')[0])
 
         # print '-------------------------------------------------------------'
-        # print 'Course name: \'' + course_details['name'] + '\''
-        # print 'Course details: \'' + str(course_details) + '\''
+        # print 'Course name: \'' + course['name'] + '\''
+        # print 'Course details: \'' + str(course) + '\''
         # print
 
-        return course_details
+        return course
 
     # Checks if a parsed element is an age class e.g W12 or M50 (women's 12 or
     # men's 50) and returns true if this is the case, false otherwise.
