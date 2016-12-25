@@ -103,7 +103,7 @@ class NapierSpider(scrapy.Spider):
 
         if "Napier - Colour" in results_format:
             NapierSpider.print_parsing(response.meta['event_title'])
-            self.parse_napier_traditional(response)
+            self.parse_napier_common(response)
         elif "MERCS" in results_format:
             text = response.css("::text").extract()
             if "Relay" in text or "relay" in text:
@@ -148,12 +148,31 @@ class NapierSpider(scrapy.Spider):
         else:
             return "--Unknown--"
 
-    def parse_napier_traditional(self, response):
+    @staticmethod
+    def get_napier_courses(response):
         # TODO: Ignore score courses that can be mixed up in the results
 
         # Select all the links that have an attribute 'name' - course headers
         # Change the below to //a name = xxx to get course & competitor info
-        courses = response.css('a:not([name=TOP])[name]')
+        courses = results = response.css('a:not([name=TOP])[name]')
+
+        # If no courses found, assume simple Napier format (no links)
+        if len(courses) == 0:
+            print "\t**Napier simple results detected**"
+            courses = response.css('p')
+            results = response.css('pre')
+            courses = [course for course in courses
+                       if "Results for " not in course.extract() and
+                       "Results software provided by" not in course.extract()]
+
+        return (courses, results)
+
+    def parse_napier_common(self, response):
+        (courses, course_results) = NapierSpider.get_napier_courses(response)
+
+        if len(courses) != len(course_results):
+            print("\t**Mismatch between number of courses and course results" +
+                  " - investigate parser**")
 
         raw_event_info = response.css('a[name=TOP] p strong::text')
         event_info, venue_info = NapierSpider.parse_event_info(
@@ -169,10 +188,10 @@ class NapierSpider(scrapy.Spider):
         # output.writerow(header_item.field_names_to_list())
 
         # Iterate over each set of course results e.g. white results
-        for course in courses:
+        for course, results in zip(courses, course_results):
             if course.css('p::text').extract_first():
                 course_info = self.parse_course_info(course)
-                parsed_results = self.parse_course_results(course,
+                parsed_results = self.parse_course_results(results,
                                                            course_info,
                                                            venue_info,
                                                            event_info)
