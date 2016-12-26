@@ -1,8 +1,20 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# To ignore numpy errors and docstrings:
-#     pylint: disable=E1101
+"""
+Parses output from Michael Napier's software, namely COLOUR and MERCS
+
+Usage:
+    scrapy crawl napier
+
+TODOs:
+    TODO: Write a parser for MERCS, OEVENTS, COCOA etc.
+    TODO: Try to match 'E-card XXXXXX' to a competitor
+    TODO: Find case of multiple 'out of order' and handle this
+    TODO: Handle different units for course length and climb
+
+@author: abradbury
+"""
 
 import re           # Regular expressions - for parsing the results
 import datetime     # For storing time information
@@ -10,18 +22,14 @@ import scrapy
 from urlparse import urlparse
 
 from Orienteering_Scraper.items import ResultItem, CourseItem, PersonItem, \
-    EventItem, VenueItem
+    EventItem, VenueItem, EventSummaryItem
 
 
-# Parses output from Michael Napier's software, namely COLOUR and MERCS
-#
-# TODO: Write a parser for MERCS, OEVENTS, COCOA etc.
-# TODO: Try to match 'E-card XXXXXX' to a competitor
-# TODO: Find case of multiple 'out of order' and handle this
-# TODO: Handle different units for course length and climb
-#
-# @author: abradbury
 class NapierSpider(scrapy.Spider):
+    """
+    Some class-level description
+    """
+
     name = "napier"
     allowed_domains = ["www.southyorkshireorienteers.org.uk"]
     start_urls = ["https://www.southyorkshireorienteers.org.uk/results"]
@@ -30,18 +38,19 @@ class NapierSpider(scrapy.Spider):
     processed_events_count = 0
 
     def parse(self, response):
-        """The main entry into the parsing process, starts at the results page
+        """
+        The main entry into the parsing process, starts at the results page
         of an orienteering website and works through the results pages,
-        yeilding to another parser for each event found on the pages"""
-
-        # print "Parsing '" +
-        # response.url.replace("https://www.southyorkshireorienteers.org.uk",
-        # "") + "'..."
+        yeilding to another parser for each event found on the pages
+        """
 
         # Process each event on the current results page
         events = response.css(
             'table.eventtable tr td[headers=jem_title] a::attr(href)')\
             .extract()
+
+        if len(events) == 0:
+            print "Error - no events found on " + response.url
 
         for event in events:
             yield scrapy.Request(response.urljoin(event),
@@ -56,82 +65,91 @@ class NapierSpider(scrapy.Spider):
         #     yield scrapy.Request(next_page, callback=self.parse)
 
     def parse_event_page(self, response):
-        """Parses a single event page on the orienteering website to identify
-        the link to the evens results page. Currently, only local event
-        result pages are parsed."""
+        """
+        Parses a single event page on the orienteering website to identify the
+        link to the evens results page. Currently, only local event
+        result pages are parsed.
 
+        Args:
+            response: the Scrapy HTTP Response object
+        """
+
+        event = EventSummaryItem(seq_id=self.discovered_events_count + 1)
         self.discovered_events_count += 1
-        event_title = response.url.\
+        event['name'] = response.url.\
             replace("https://www.southyorkshireorienteers.org.uk/events/" +
                     "event/", "").split('/')[0]
 
         # From an event's page, get the link to its results & send for parsing
-        event_results = response.css(
+        results_url = response.css(
             'dl.event_info dd.custom4 a::attr(href)').extract_first()
-        if event_results is not None:
-            url_path_parts = urlparse(event_results).path.split('.')
+        if results_url is not None:
+            url_path_parts = urlparse(results_url).path.split('.')
             file_type = url_path_parts[-1] if len(url_path_parts) > 1 else None
-            if "http" not in event_results or "southyorkshireorienteers" in event_results:
+            if "http" not in results_url or "southyorkshireorienteers" in results_url:
                 if file_type is None or "htm" in file_type:
-                    yield scrapy.Request(response.urljoin(event_results),
-                                         meta={'event_title': event_title},
+                    yield scrapy.Request(response.urljoin(results_url),
+                                         meta={'event_object': event},
                                          callback=self.parse_result)
                 else:
-                    NapierSpider.print_parsing(event_title)
-                    print "\t--" + str(file_type.upper()) + " not supported"
+                    event['status'] = str(file_type.upper()) + " not supported"
+                    NapierSpider.printSummary(event)
             else:
-                NapierSpider.print_parsing(event_title)
-                print "\t--Not following external link '" + event_results + "'"
+                event['status'] = "Not following external link '" + results_url + "'"
+                NapierSpider.printSummary(event)
         else:
-            NapierSpider.print_parsing(event_title)
-            print "\t--No results link found"
-
-    @staticmethod
-    def print_header(text):
-        """A helper method to print 'header' text to the console"""
-        print "{0:-<150}".format(text)
-
-    @staticmethod
-    def print_parsing(text):
-        """A helper method to print the title of the event being parsed"""
-        NapierSpider.print_header("- Parsing " + text + "... ")
+            event['status'] = "No results link found"
+            NapierSpider.printSummary(event)
 
     def parse_result(self, response):
-        """Parses and identifies the type of the event results pages"""
+        """
+        Parses and identifies the type of the event results pages
+        """
 
+        event = response.meta['event_object']
         results_format = self.identify_results_page(response)
 
         if "Napier - Colour" in results_format:
-            NapierSpider.print_parsing(response.meta['event_title'])
-            self.parse_napier_common(response)
+            event['results_format'] = "Napier - Colour"
+            self.parse_napier_common(response, event)
         elif "MERCS" in results_format:
             text = response.css("::text").extract()
             if "Relay" in text or "relay" in text:
-                NapierSpider.print_parsing(response.meta['event_title'])
-                print "\t--MERCS relay events not yet supported"
+                event['results_format'] = "MERCS relay"
+                event['status'] = "MERCS relay events not supported"
+                NapierSpider.printSummary(event)
             # elif ???
-            #     print "\t--MERCS multi-day events not yet supported"
+            #     event['results_format'] = "MERCS multi-day"
+            #     event['status'] = "MERCS multi-day events not supported"
+            #     NapierSpider.printSummary(event)
             # elif ???
-            #     print "\t--MERCS class-split event results not supported"
+            #     event['results_format'] = "MERCS class-split"
+            #     event['status'] = "MERCS class-split events not supported"
+            #     NapierSpider.printSummary(event)
             else:
                 links = response.css("p a::attr(href)").extract()
                 if "results.htm" in links:
                     mercs_result_page = links[links.index("results.htm")]
-                    # print "\tMERCS simple event results found"
+                    event['results_format'] = "MERCS simple"
                     yield scrapy.Request(response.urljoin(mercs_result_page),
-                                         meta={'event_title':
-                                         response.meta['event_title']},
+                                         meta={'event_object': event},
                                          callback=self.parse_result)
                 else:
-                    NapierSpider.print_parsing(response.meta['event_title'])
-                    print "\t--MERCS no results link found"
-
+                    event['status'] = "MERCS no results link found"
+                    NapierSpider.printSummary(event)
         else:
-            NapierSpider.print_parsing(response.meta['event_title'])
-            print "\t--Unsupported results format: " + results_format
+            event['status'] = "Unsupported results format: " + results_format
+            event['results_format'] = results_format
+            NapierSpider.printSummary(event)
 
     @staticmethod
     def identify_results_page(response):
+        """
+        Identifies the format of a results page based on the response.
+
+        Args:
+            response: the Scrapy HTTP Response object
+        """
         napier_raw = response.css('address p::text')
         mercs_raw = response.css('address p a::text')
         stephan_raw = response.css('table tr td small a::text')
@@ -149,7 +167,7 @@ class NapierSpider(scrapy.Spider):
             return "--Unknown--"
 
     @staticmethod
-    def get_napier_courses(response):
+    def get_napier_courses(response, event):
         # TODO: Ignore score courses that can be mixed up in the results
 
         # Select all the links that have an attribute 'name' - course headers
@@ -158,7 +176,7 @@ class NapierSpider(scrapy.Spider):
 
         # If no courses found, assume simple Napier format (no links)
         if len(courses) == 0:
-            print "\t**Napier simple results detected**"
+            event['results_format'] += " (simple)"
             courses = response.css('p')
             results = response.css('pre')
             courses = [course for course in courses
@@ -167,25 +185,21 @@ class NapierSpider(scrapy.Spider):
 
         return (courses, results)
 
-    def parse_napier_common(self, response):
-        (courses, course_results) = NapierSpider.get_napier_courses(response)
+    def parse_napier_common(self, response, event):
+        (courses, course_results) = NapierSpider.get_napier_courses(response,
+                                                                    event)
 
         if len(courses) != len(course_results):
-            print("\t**Mismatch between number of courses and course results" +
-                  " - investigate parser**")
+            event['status'] = (str(event.get('status', "")) +
+                               ("**Mismatch between number of courses and " +
+                                "course results - investigate parser**"))
 
         raw_event_info = response.css('a[name=TOP] p strong::text')
         event_info, venue_info = NapierSpider.parse_event_info(
             raw_event_info, response)
 
         items = []      # Each result
-        # courses = []    # A list of all courses for the event
-
-        # Set up the CSV output and write the header row
-        # with open('output.csv', 'wb') as csvfile:
-        # output = csv.writer(csvfile)
-        # header_item = ResultItem()
-        # output.writerow(header_item.field_names_to_list())
+        processed_courses = []    # A list of all courses for the event
 
         # Iterate over each set of course results e.g. white results
         for course, results in zip(courses, course_results):
@@ -197,24 +211,20 @@ class NapierSpider(scrapy.Spider):
                                                            event_info)
 
                 items.extend(parsed_results)
-                # courses.append(course_info)
-
-                # for parsed_result in parsed_results:
-                #     output.writerow(parsed_result.fields_to_list())
-
-        # Print the course details
-        # print 'Number of courses: ' + str(len(courses))
-        # for course in courses:
-        #     print course.get('uid'), course.get('name'), \
-        #         course.get('length'), course.get('climb'), \
-        #         course.get('controls'), course.get('competitors')
+                processed_courses.extend(course_info)
 
         if (len(items) == 0):
-            print "\t**No results detected - investigate parser**"
+            event['status'] = (str(event.get('status', "")) +
+                               ("**No results detected - " +
+                                "investigate parser**"))
+        else:
+            self.processed_events_count += 1
+            event['status'] = "OK"
 
-        self.processed_events_count += 1
-        print "\t++ Found {:d} results over {:d} courses ({:s})"\
-            .format(len(items), len(courses), event_info['name'])
+        event['name'] = event_info['name'] + " at " + venue_info['name']
+        event['results'] = items
+        event['courses'] = processed_courses
+        NapierSpider.printSummary(event)
 
         return items
 
@@ -255,12 +265,16 @@ class NapierSpider(scrapy.Spider):
 
         return parsed_results
 
-    # Extracts the course information (such as name, length etc.)
-    #
-    # @param    raw_course   m
-    # @return                   m
     @staticmethod
     def parse_course_info(raw_course):
+        """
+        Extracts the course information (such as name, length etc.)
+
+        Args:
+            raw_course: ??
+        Returns:
+            ??
+        """
         course = CourseItem()
 
         course['name'] = raw_course.css('p strong::text').extract_first()
@@ -278,20 +292,19 @@ class NapierSpider(scrapy.Spider):
                 course['controls'] = int(
                     course_descriptor.split(' ')[0])
 
-        # print '-------------------------------------------------------------'
-        # print 'Course name: \'' + course['name'] + '\''
-        # print 'Course details: \'' + str(course) + '\''
-        # print
-
         return course
 
-    # Checks if a parsed element is an age class e.g W12 or M50 (women's 12 or
-    # men's 50) and returns true if this is the case, false otherwise.
-    #
-    # @param    value   The value to check
-    # @return           True if the value is an age class, false otherwise
     @staticmethod
     def is_age_class(value):
+        """
+        Checks if a parsed element is an age class e.g W12 or M50 (women's 12
+        or men's 50) and returns true if this is the case, false otherwise.
+
+        Args:
+            value: the value to check
+        Returns:
+            true if the value is an age class, false otherwise
+        """
         first_char = value[0]
         other_char = value[1:]
         result = False
@@ -301,12 +314,15 @@ class NapierSpider(scrapy.Spider):
                 result = True
         return result
 
-    # Identifies the element in a row
-    # TODO: Separate person and result item parsing into two methods
-    #
-    # @param    row                 The row to analyse
     @staticmethod
     def parse_result_row(raw_row):
+        """
+        Identifies the element in a row
+        TODO: Separate person and result item parsing into two methods
+
+        Args:
+            row: the row to analyse
+        """
         person = PersonItem()
         result = ResultItem()
 
@@ -383,13 +399,17 @@ class NapierSpider(scrapy.Spider):
 
         return person
 
-    # Parses the missed controls numbers from a string such as '1,4-6' to
-    # return a list of missed control numbers as integers e.g. [1,4,5,6].
-    #
-    # @param    value   The missed controls to parse
-    # @return           A list containing the missed controls
     @staticmethod
     def parse_missed_controls(value):
+        """
+        Parses the missed controls numbers from a string such as '1,4-6' to
+        return a list of missed control numbers as integers e.g. [1,4,5,6].
+
+        Args:
+            value: the missed controls to parse
+        Returns:
+            a list containing the missed controls
+        """
         missing = []
         for group in value.replace(";", "").split(','):
             split_group = group.split('-')
@@ -404,3 +424,15 @@ class NapierSpider(scrapy.Spider):
             .format(int((self.processed_events_count /
                     float(self.discovered_events_count)) * 100),
                     self.processed_events_count, self.discovered_events_count)
+
+    @staticmethod
+    def printSummary(event):
+        print "/" + ("=" * 163) + "\\"
+        print "| {0:<4} {1:<156} |".format(str(event['seq_id']) + ")", event['name'])
+        print "| " + ("-" * 162) + "|"
+        print "| {0:<10} {1:<150} |".format("Status:", event.get("status", ""))
+        print "| {0:<10} {1:<150} |".format("Format:", event.get("results_format", ""))
+        print "| {0:<10} {1:<150} |".format("Courses:", len(event.get("courses", "")))
+        print "| {0:<10} {1:<150} |".format("Results:", len(event.get("results", "")))
+        print "\\" + ("=" * 163) + "/"
+        print ""

@@ -11,14 +11,26 @@
 
 from scrapy.item import Item, Field
 
+
+class EventSummaryItem(Item):
+    seq_id = Field()
+    url = Field()
+    name = Field()
+    results_format = Field()
+    status = Field()
+    results = Field()       # [PersonItem]
+    courses = Field()       # [CourseItem]
+
+
 class PersonItem(Item):
     name = Field()
     club = Field()
     ageClass = Field()
-    result = Field()
-    course = Field()
-    event = Field()
-    venue = Field()
+    result = Field()        # ResultItem
+    course = Field()        # CourseItem
+    event = Field()         # EventItem
+    venue = Field()         # VenueItem
+
 
 class ResultItem(Item):
     position = Field()
@@ -28,15 +40,18 @@ class ResultItem(Item):
     missed = Field()
     out_of_order = Field()
 
+
 class CourseItem(Item):
     name = Field()
     length = Field()
     climb = Field()
     controls = Field()
 
+
 class VenueItem(Item):
     name = Field()
     location = Field()
+
 
 class EventItem(Item):
     name = Field()
@@ -44,4 +59,3 @@ class EventItem(Item):
     category = Field()
     date = Field()
     url = Field()
-    
