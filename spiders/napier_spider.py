@@ -76,9 +76,7 @@ class NapierSpider(scrapy.Spider):
 
         event = EventSummaryItem(seq_id=self.discovered_events_count + 1)
         self.discovered_events_count += 1
-        event['name'] = response.url.\
-            replace("https://www.southyorkshireorienteers.org.uk/events/" +
-                    "event/", "").split('/')[0]
+        event['name'] = response.url
 
         # From an event's page, get the link to its results & send for parsing
         results_url = response.css(
@@ -101,6 +99,18 @@ class NapierSpider(scrapy.Spider):
             event['status'] = "No results link found"
             NapierSpider.printSummary(event)
 
+    def update_event_results_format(self, event, results_format):
+        """
+        Updates the result format of an event such that the actual result
+        format is not lost when an event is able to be parsed using an
+        existing parser e.g. MERCS simple events can be parsed by Colour
+        """
+        if 'results_format' in event:
+            event['results_format'] = event['results_format'] + \
+                ' (parsed as ' + results_format + ' )'
+        else:
+            event['results_format'] = results_format
+
     def parse_result(self, response):
         """
         Parses and identifies the type of the event results pages
@@ -110,27 +120,27 @@ class NapierSpider(scrapy.Spider):
         results_format = self.identify_results_page(response)
 
         if "Napier - Colour" in results_format:
-            event['results_format'] = "Napier - Colour"
+            self.update_event_results_format(event, "Napier - Colour")
             self.parse_napier_common(response, event)
         elif "MERCS" in results_format:
             text = response.css("::text").extract()
             if "Relay" in text or "relay" in text:
-                event['results_format'] = "MERCS relay"
+                self.update_event_results_format(event, "MERCS relay")
                 event['status'] = "MERCS relay events not supported"
                 NapierSpider.printSummary(event)
             # elif ???
-            #     event['results_format'] = "MERCS multi-day"
+            #     self.update_event_results_format(event, "MERCS multi-day")
             #     event['status'] = "MERCS multi-day events not supported"
             #     NapierSpider.printSummary(event)
             # elif ???
-            #     event['results_format'] = "MERCS class-split"
+            #     self.update_event_results_format(event, "MERCS class-split")
             #     event['status'] = "MERCS class-split events not supported"
             #     NapierSpider.printSummary(event)
             else:
                 links = response.css("p a::attr(href)").extract()
                 if "results.htm" in links:
                     mercs_result_page = links[links.index("results.htm")]
-                    event['results_format'] = "MERCS simple"
+                    self.update_event_results_format(event, "MERCS simple")
                     yield scrapy.Request(response.urljoin(mercs_result_page),
                                          meta={'event_object': event},
                                          callback=self.parse_result)
@@ -139,7 +149,7 @@ class NapierSpider(scrapy.Spider):
                     NapierSpider.printSummary(event)
         else:
             event['status'] = "Unsupported results format: " + results_format
-            event['results_format'] = results_format
+            self.update_event_results_format(event, results_format)
             NapierSpider.printSummary(event)
 
     @staticmethod
