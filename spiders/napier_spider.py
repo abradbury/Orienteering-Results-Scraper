@@ -324,19 +324,26 @@ class NapierSpider(scrapy.Spider):
         """
         Checks if a parsed element is an age class e.g W12 or M50 (women's 12
         or men's 50) and returns true if this is the case, false otherwise.
+        Also returns true for informal age classes such as MO, WV, MSV, WUV, MJ
+        (men's open, women's veteran, men's super vet, women's ultra vet and
+        men's junior, respectively)
 
         Args:
             value: the value to check
         Returns:
             true if the value is an age class, false otherwise
         """
-        first_char = value[0]
-        other_char = value[1:]
-        result = False
+        if value.upper() in ["MJ", "WJ", "MO", "WO", "MV", "WV", "MSV", "WSV",
+                             "MUV", "WUV"]:
+            result = True
+        else:
+            first_char = value[0]
+            other_char = value[1:]
+            result = False
 
-        if(first_char == 'M') or (first_char == 'W'):
-            if other_char.isdigit():
-                result = True
+            if(first_char == 'M') or (first_char == 'W'):
+                if other_char.isdigit():
+                    result = True
         return result
 
     @staticmethod
@@ -376,6 +383,9 @@ class NapierSpider(scrapy.Spider):
                     person['name'] = "E-card " + element
                     ecard_flag = False
 
+            elif NapierSpider.is_age_class(element):  # Age class (M/W number or MO, MSV etc)
+                person['ageClass'] = element
+
             # Match the characters to name, club and status flags
             elif re.match("^[a-zA-Z-\']+$", element.rstrip(',')) and not missing_flag:
                 if element.isupper():               # Club
@@ -407,9 +417,6 @@ class NapierSpider(scrapy.Spider):
 
             elif element == "n/c":                  # N/C (Non-Competitive)
                 result['status'] = 'n/c'
-
-            elif NapierSpider.is_age_class(element):  # Age class (M/W number)
-                person['ageClass'] = element
 
             elif ':' in element:                    # Time
                 time_parts = element.split(':')
