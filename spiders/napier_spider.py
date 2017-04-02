@@ -211,7 +211,7 @@ class NapierSpider(scrapy.Spider):
                                                            event_info)
 
                 items.extend(parsed_results)
-                processed_courses.extend(course_info)
+                processed_courses.append(dict(course_info))
 
         if (len(items) == 0):
             event['status'] = (str(event.get('status', "")) +
@@ -427,6 +427,10 @@ class NapierSpider(scrapy.Spider):
 
     @staticmethod
     def printSummary(event):
+        """
+        event is of type Item and because courses could be empty, the .get method 
+        with a default value is neede instead of event['courses']
+        """
         print "/" + ("=" * 163) + "\\"
         print "| {0:<4} {1:<156} |".format(str(event['seq_id']) + ")", event['name'])
         print "| " + ("-" * 162) + "|"
