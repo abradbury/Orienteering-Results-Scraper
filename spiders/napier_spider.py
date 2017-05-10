@@ -12,9 +12,24 @@ TODOs:
     TODO: Try to match 'E-card XXXXXX' to a competitor
     TODO: Find case of multiple 'out of order' and handle this
     TODO: Handle different units for course length and climb
+    TODO: Handle 'dnf' and 'No finish time' e.g. 2017-03-18-norfolk-park
+    TODO: Handle non-latin names e.g. Jimena Calvo SÃ¡enz at above
+
+Data source problems:
+ - Sometimes there can be no space between name and club e.g. https://www.southyorkshireorienteers.org.uk/event/2017-04-29-parkwood-springs/results_v2.htm
 
 @author: abradbury
 """
+
+# Definitions: 
+# Homepage              https://www.southyorkshireorienteers.org.uk/
+# Results List Page     https://www.southyorkshireorienteers.org.uk/results
+# Event Page            https://www.southyorkshireorienteers.org.uk/events/event/642-outdoor-city-weekender-middle-distance-race
+# Event Results Page    https://www.southyorkshireorienteers.org.uk/event/2017-01-22-big-moor/index.htm
+
+# Useful MongoDB queries:
+# db.results.find({ 'results.name': 'Bob Smith' }, { 'name': 1 })
+# { "_id" : ObjectId("87y"), "name" : "Night Event at Bowden Houstead" }
 
 import re           # Regular expressions - for parsing the results
 import datetime     # For storing time information
@@ -34,14 +49,24 @@ class NapierSpider(scrapy.Spider):
     allowed_domains = ["www.southyorkshireorienteers.org.uk"]
     start_urls = ["https://www.southyorkshireorienteers.org.uk/results"]
 
+    # Counters used in end of scraping summary output
     discovered_events_count = 0
     processed_events_count = 0
+    processed_courses_count = 0
+    processed_results_count = 0
+
+    # ======================================================================= #
+    # Page parsers ---------------------------------------------------------- #
+    # ======================================================================= #
 
     def parse(self, response):
         """
-        The main entry into the parsing process, starts at the results page
-        of an orienteering website and works through the results pages,
-        yeilding to another parser for each event found on the pages
+        The main entry into the parsing process, starts at the results list 
+        page of an orienteering website and works through the results pages,
+        yeilding to another parser for each event found on these pages.
+
+        Example URL: 
+            https://www.southyorkshireorienteers.org.uk/results
         """
 
         # Process each event on the current results page
@@ -67,11 +92,14 @@ class NapierSpider(scrapy.Spider):
     def parse_event_page(self, response):
         """
         Parses a single event page on the orienteering website to identify the
-        link to the evens results page. Currently, only local event
-        result pages are parsed.
+        link to the event results page. Currently, only local event result 
+        pages are parsed.
 
         Args:
             response: the Scrapy HTTP Response object
+
+        Example URL:
+            https://www.southyorkshireorienteers.org.uk/events/event/622-local-and-schools-event
         """
 
         event = EventSummaryItem(seq_id=self.discovered_events_count + 1)
@@ -89,7 +117,7 @@ class NapierSpider(scrapy.Spider):
                 if file_type is None or "htm" in file_type:
                     yield scrapy.Request(response.urljoin(results_url),
                                          meta={'event_object': event},
-                                         callback=self.parse_result)
+                                         callback=self.parse_event_results_page)
                 else:
                     event['status'] = str(file_type.upper()) + " not supported"
                     NapierSpider.printSummary(event)
@@ -103,21 +131,12 @@ class NapierSpider(scrapy.Spider):
             NapierSpider.printSummary(event)
             yield event
 
-    def update_event_results_format(self, event, results_format):
-        """
-        Updates the result format of an event such that the actual result
-        format is not lost when an event is able to be parsed using an
-        existing parser e.g. MERCS simple events can be parsed by Colour
-        """
-        if 'results_format' in event:
-            event['results_format'] = event['results_format'] + \
-                ' (parsed as ' + results_format + ')'
-        else:
-            event['results_format'] = results_format
-
-    def parse_result(self, response):
+    def parse_event_results_page(self, response):
         """
         Parses and identifies the type of the event results pages
+
+        Example URL:
+            https://www.southyorkshireorienteers.org.uk/event/2017-04-29-parkwood-springs/results_v2.htm
         """
 
         event = response.meta['event_object']
@@ -156,7 +175,7 @@ class NapierSpider(scrapy.Spider):
                     self.update_event_results_format(event, "MERCS simple")
                     yield scrapy.Request(response.urljoin(mercs_result_page),
                                          meta={'event_object': event},
-                                         callback=self.parse_result)
+                                         callback=self.parse_event_results_page)
                 else:
                     event['status'] = "MERCS no results link found"
                     NapierSpider.printSummary(event)
@@ -166,6 +185,22 @@ class NapierSpider(scrapy.Spider):
             self.update_event_results_format(event, results_format)
             NapierSpider.printSummary(event)
             yield event
+
+    # ======================================================================= #
+    # Other functions ------------------------------------------------------- #
+    # ======================================================================= #
+
+    def update_event_results_format(self, event, results_format):
+        """
+        Updates the result format of an event such that the actual result
+        format is not lost when an event is able to be parsed using an
+        existing parser e.g. MERCS simple events can be parsed by Colour
+        """
+        if 'results_format' in event:
+            event['results_format'] = event['results_format'] + \
+                ' (parsed as ' + results_format + ')'
+        else:
+            event['results_format'] = results_format
 
     @staticmethod
     def identify_results_page(response):
@@ -192,7 +227,7 @@ class NapierSpider(scrapy.Spider):
             return "--Unknown--"
 
     @staticmethod
-    def get_napier_courses(response, event):
+    def identify_course_data(response, event):
         # TODO: Ignore score courses that can be mixed up in the results
 
         # Select all the links that have an attribute 'name' - course headers
@@ -211,54 +246,53 @@ class NapierSpider(scrapy.Spider):
         return (courses, results)
 
     def parse_napier_common(self, response, event):
-        (courses, course_results) = NapierSpider.get_napier_courses(response,
-                                                                    event)
+        (courses, course_results) = NapierSpider.identify_course_data(response, event)
+        (event_info, venue_info) = NapierSpider.identify_event_info(response)
 
         if len(courses) != len(course_results):
             event['status'] = (str(event.get('status', "")) +
                                ("**Mismatch between number of courses and " +
                                 "course results - investigate parser**"))
 
-        raw_event_info = response.css('a[name=TOP] p strong::text')
-        event_info, venue_info = NapierSpider.parse_event_info(
-            raw_event_info, response)
-
-        items = []      # Each result
-        processed_courses = []    # A list of all courses for the event
+        event_results = []      # Each result
+        processed_courses = []  # A list of all courses for the event
 
         # Iterate over each set of course results e.g. white results
         for course, results in zip(courses, course_results):
             if course.css('p::text').extract_first():
-                course_info = self.parse_course_info(course)
-                parsed_results = self.parse_course_results(results,
-                                                           course_info,
-                                                           venue_info,
-                                                           event_info)
+                course_info = NapierSpider.parse_course_info(course)
+                parsed_results = NapierSpider.parse_course_results(results,
+                                                                   course_info,
+                                                                   venue_info,
+                                                                   event_info)
 
-                items.extend(parsed_results)
+                event_results.extend(parsed_results)
                 processed_courses.append(dict(course_info))
 
-        if (len(items) == 0):
+        if (len(event_results) == 0):
             event['status'] = (str(event.get('status', "")) +
                                ("**No results detected - " +
                                 "investigate parser**"))
         else:
             self.processed_events_count += 1
+            self.processed_courses_count += len(processed_courses)
+            self.processed_results_count += len(event_results)
             event['status'] = "OK"
 
         event['name'] = event_info['name'] + " at " + venue_info['name']
-        event['results'] = items
+        event['results'] = event_results
         event['courses'] = processed_courses
         NapierSpider.printSummary(event)
 
         return event
 
     @staticmethod
-    def parse_event_info(event_info, response):
+    def identify_event_info(response):
         event = EventItem()
         venue = VenueItem()
 
-        split_event_info = event_info.extract_first().split(', ')
+        raw_event_info = response.css('a[name=TOP] p strong::text')
+        split_event_info = raw_event_info.extract_first().split(', ')
 
         event['date'] = split_event_info[-1]
         event['name'] = split_event_info[0].replace('Results for ', '')
@@ -268,7 +302,8 @@ class NapierSpider(scrapy.Spider):
 
         return event, venue
 
-    def parse_course_results(self, course, course_info, venue_info, event_info):
+    @staticmethod
+    def parse_course_results(course, course_info, venue_info, event_info):
         # Parse and store each competitor's result
         course_results = course.css('pre').extract_first().splitlines()
         parsed_results = []
@@ -278,15 +313,11 @@ class NapierSpider(scrapy.Spider):
 
             # Try to filter out irrelavent rows, e.g. 'green men's standard'
             if (len(split_row) > 2) and ('<i>' not in split_row[0]):
-                parsed_result = self.parse_result_row(result)
+                parsed_result = NapierSpider.parse_result_row(result)
                 parsed_result['course'] = dict(course_info)
                 parsed_result['venue'] = dict(venue_info)
                 parsed_result['event'] = dict(event_info)
                 parsed_results.append(parsed_result)
-
-                # print "Raw: '" + str(result) + "'"
-                # print "Parsed: " + str(parsed_result)
-                # print
 
         return parsed_results
 
@@ -319,32 +350,9 @@ class NapierSpider(scrapy.Spider):
 
         return course
 
-    @staticmethod
-    def is_age_class(value):
-        """
-        Checks if a parsed element is an age class e.g W12 or M50 (women's 12
-        or men's 50) and returns true if this is the case, false otherwise.
-        Also returns true for informal age classes such as MO, WV, MSV, WUV, MJ
-        (men's open, women's veteran, men's super vet, women's ultra vet and
-        men's junior, respectively)
-
-        Args:
-            value: the value to check
-        Returns:
-            true if the value is an age class, false otherwise
-        """
-        if value.upper() in ["MJ", "WJ", "MO", "WO", "MV", "WV", "MSV", "WSV",
-                             "MUV", "WUV"]:
-            result = True
-        else:
-            first_char = value[0]
-            other_char = value[1:]
-            result = False
-
-            if(first_char == 'M') or (first_char == 'W'):
-                if other_char.isdigit():
-                    result = True
-        return result
+    # ======================================================================= #
+    # Extract individual results data --------------------------------------- #
+    # ======================================================================= #
 
     @staticmethod
     def parse_result_row(raw_row):
@@ -432,6 +440,33 @@ class NapierSpider(scrapy.Spider):
         return person
 
     @staticmethod
+    def is_age_class(value):
+        """
+        Checks if a parsed element is an age class e.g W12 or M50 (women's 12
+        or men's 50) and returns true if this is the case, false otherwise.
+        Also returns true for informal age classes such as MO, WV, MSV, WUV, MJ
+        (men's open, women's veteran, men's super vet, women's ultra vet and
+        men's junior, respectively)
+
+        Args:
+            value: the value to check
+        Returns:
+            true if the value is an age class, false otherwise
+        """
+        if value.upper() in ["MJ", "WJ", "MO", "WO", "MV", "WV", "MSV", "WSV",
+                             "MUV", "WUV"]:
+            result = True
+        else:
+            first_char = value[0]
+            other_char = value[1:]
+            result = False
+
+            if(first_char == 'M') or (first_char == 'W'):
+                if other_char.isdigit():
+                    result = True
+        return result
+
+    @staticmethod
     def parse_missed_controls(value):
         """
         Parses the missed controls numbers from a string such as '1,4-6' to
@@ -451,11 +486,23 @@ class NapierSpider(scrapy.Spider):
                 missing += [int(split_group[0])]
         return missing
 
+    # ======================================================================= #
+    # Miscellaneous functions  ---------------------------------------------- #
+    # ======================================================================= #
+
     def closed(self, reason):
+        """
+        Called when the Scrapy crawler has completed and it being closed down
+        """
+
         print "{:d}% of events processed ({:d} of {:d})"\
             .format(int((self.processed_events_count /
                     float(self.discovered_events_count)) * 100),
                     self.processed_events_count, self.discovered_events_count)
+        
+        print "{:d} results found over {:d} courses"\
+            .format(int(self.processed_results_count), 
+                int(self.processed_courses_count))
 
     @staticmethod
     def printSummary(event):
