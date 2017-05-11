@@ -17,6 +17,7 @@ TODOs:
 
 Data source problems:
  - Sometimes there can be no space between name and club e.g. https://www.southyorkshireorienteers.org.uk/event/2017-04-29-parkwood-springs/results_v2.htm
+ - Some events have mixed courses (e.g. score and normal...) https://www.southyorkshireorienteers.org.uk/event/2016-12-03-Christmas-event/results.htm
 
 @author: abradbury
 """
@@ -303,25 +304,6 @@ class NapierSpider(scrapy.Spider):
         return event, venue
 
     @staticmethod
-    def parse_course_results(course, course_info, venue_info, event_info):
-        # Parse and store each competitor's result
-        course_results = course.css('pre').extract_first().splitlines()
-        parsed_results = []
-
-        for result in course_results:
-            split_row = result.split()
-
-            # Try to filter out irrelavent rows, e.g. 'green men's standard'
-            if (len(split_row) > 2) and ('<i>' not in split_row[0]):
-                parsed_result = NapierSpider.parse_result_row(result)
-                parsed_result['course'] = dict(course_info)
-                parsed_result['venue'] = dict(venue_info)
-                parsed_result['event'] = dict(event_info)
-                parsed_results.append(parsed_result)
-
-        return parsed_results
-
-    @staticmethod
     def parse_course_info(raw_course):
         """
         Extracts the course information (such as name, length etc.)
@@ -355,7 +337,90 @@ class NapierSpider(scrapy.Spider):
     # ======================================================================= #
 
     @staticmethod
-    def parse_result_row(raw_row):
+    def parse_course_results(course_results, course_info, venue_info, event_info):
+        """
+        Takes the raw results for a given course and extracts the results into 
+        a list of result objects. 
+
+        Rather than splitting each row by spaces, this function finds the 
+        indicies of the common spaces across all rows for a given set of 
+        course results. These indicies are then used to extract the data. 
+
+        Args:
+            course_results  the raw course results
+            course_info     a
+            venue_info      a
+            event_info      a 
+        """
+
+        # Extract data to list based on common space indicies
+        course_results = course_results.css('pre::text').extract_first()
+        space_indices = [NapierSpider.find_space_indices(line) for line in course_results.split('\n') if len(line) > 0 and '<i>' not in line and not line.isspace()]
+        max_line_length = max([len(line) for line in course_results.split('\n')])
+        common_space_indices = sorted(list(set([0] + NapierSpider.find_common_space_indices(space_indices) + [max_line_length])))
+        column_indices = NapierSpider.identify_column_indices(common_space_indices)
+        extracted_data = NapierSpider.extract_data(course_results, column_indices)
+
+        # Sanity check
+        max_columns = max([len(x) for x in extracted_data])
+        if max_columns > 6 or max_columns < 5:
+            print "WARNING: Invalid column limit (" + str(max_columns) + ") for " + event_info['name'] + " at " + venue_info['name'] + " on " + event_info['date']
+            return None
+
+        # Process extracted data into list of objects
+        parsed_results = []
+        for result_row in extracted_data:
+            parsed_result = NapierSpider.parse_result_row(result_row)
+            
+            parsed_result['course'] = dict(course_info)
+            parsed_result['venue'] = dict(venue_info)
+            parsed_result['event'] = dict(event_info)
+
+            parsed_results.append(parsed_result)
+
+        return parsed_results
+
+    @staticmethod
+    def find_space_indices(line):
+        """
+        Returns a list of the indicies where there is a space in the input line
+        """
+        return [i for i, x in enumerate(line) if x == ' ']
+
+    @staticmethod
+    def find_common_space_indices(space_indices):
+        """
+        Returns a list of common indicies from the input list of lists of 
+        indicies where there are spaces on a given line
+        """
+        return sorted(list(reduce((lambda x, y: set(x).intersection(y)), space_indices)))
+
+    @staticmethod
+    def identify_column_indices(common_space_indices):
+        """
+        Returns a list of tuples where each tuple is the bounding indicies 
+        for a given column, identified through common spaces indicies
+        """
+        pairs = [(x, common_space_indices[i+1]) for i, x in enumerate(common_space_indices) if i < len(common_space_indices) - 1]
+        return [x for x in pairs if x[1] - x[0] > 1]
+
+    @staticmethod
+    def extract_data(data, column_indices):
+        """
+        Uses the supplied list of column indicies to split the raw course
+        result data into a list of list
+        """
+        parsed_data = []
+        for line in data.split('\n'):
+            if len(line) > 0 and '<i>' not in line:
+                parsed_line = []
+                for column in column_indices:
+                    parsed_line += [line[column[0]:column[1]].strip()]
+                parsed_data.append(parsed_line)
+        return parsed_data
+
+    @staticmethod
+    def parse_result_row(input_row):
         """
         Identifies the element in a row
         TODO: Separate person and result item parsing into two methods
@@ -364,107 +429,41 @@ class NapierSpider(scrapy.Spider):
             row: the row to analyse
         """
         person = PersonItem()
-        result = ResultItem()
+        result = ResultItem() 
 
-        missing_flag = False     # True when the competitor has missed controls
-        ecard_flag = False       # True when the competitor details are unknown
+        # Position
+        raw_position = input_row[0].rstrip('=;')
+        if raw_position.isdigit():
+            result['status'] = 'ok'
+        else:
+            result['status'] = raw_position
 
-        if "out of order" in raw_row:
-            result['out_of_order'] = int(raw_row.split("out of order")[0]
-                                         .strip().split()[-1])
-            raw_row = raw_row.replace("out of order", "")
+        # Name
+        person['name'] = input_row[1]
+        
+        # Club
+        person['club'] = input_row[2]
 
-        split_row = raw_row.split()
+        # Age Class
+        person['ageClass'] = input_row[3]
 
-        # Iterate over row elements
-        for i, element in enumerate(split_row):
-            # Match the numerical elements such as position and missed controls
-            if element.rstrip('=;').isdigit():
-                if i == 0:                          # Position
-                    result['position'] = int(element.rstrip('='))
-                    result['status'] = 'ok'
-                elif missing_flag:                   # Missed controls
-                    if ';' in element:
-                        missing_flag = False
-                    result['missed'] = [int(element.rstrip(';'))]
-                elif ecard_flag:                     # E-card number
-                    person['name'] = "E-card " + element
-                    ecard_flag = False
+        # Time
+        raw_time = input_row[4]
+        if ':' in raw_time:
+            time_parts = raw_time.split(':')
+            full_minutes = int(time_parts[0])
+            hours = full_minutes / 60
+            minutes = full_minutes % 60
+            seconds = int(time_parts[1])
+            result['time'] = datetime.time(hours, minutes, seconds).isoformat()
+        else:
+            result['status'] = raw_time
 
-            elif NapierSpider.is_age_class(element):  # Age class (M/W number or MO, MSV etc)
-                person['ageClass'] = element
-
-            # Match the characters to name, club and status flags
-            elif re.match("^[a-zA-Z-\']+$", element.rstrip(',')) and not missing_flag:
-                if element.isupper():               # Club
-                    person['club'] = element
-                elif element == "Missing":          # Missing controls
-                    missing_flag = True
-                elif i == 0 and element == "mp":    # MP (Miss-Punched)
-                    result['status'] = 'mp'
-                elif element == "rtd":              # RTD (Retired)
-                    result['status'] = 'rtd'
-                elif element == "dns":              # DNS (Did not start)
-                    result['status'] = 'dns'
-                # E-card (unknown competitor)
-                elif element == 'E-card':
-                    ecard_flag = True
-                elif ';' in element:
-                    missing_flag = False
-                else:                               # Name
-                    try:
-                        person['name'] += " " + element
-                    except KeyError:
-                        person['name'] = element
-
-            elif missing_flag and "no" not in element:
-                result['missed'] = NapierSpider.parse_missed_controls(element)
-                missing_flag = False
-                if ";" in element:
-                    ooo_flag = True
-
-            elif element == "n/c":                  # N/C (Non-Competitive)
-                result['status'] = 'n/c'
-
-            elif ':' in element:                    # Time
-                time_parts = element.split(':')
-                full_minutes = int(time_parts[0])
-                hours = full_minutes / 60
-                minutes = full_minutes % 60
-                seconds = int(time_parts[1])
-                result['time'] = datetime.time(
-                    hours, minutes, seconds).isoformat()
+        # Comments
+        # NapierSpider.parse_missed_controls(input_row[5])
 
         person['result'] = dict(result)
-
         return person
-
-    @staticmethod
-    def is_age_class(value):
-        """
-        Checks if a parsed element is an age class e.g W12 or M50 (women's 12
-        or men's 50) and returns true if this is the case, false otherwise.
-        Also returns true for informal age classes such as MO, WV, MSV, WUV, MJ
-        (men's open, women's veteran, men's super vet, women's ultra vet and
-        men's junior, respectively)
-
-        Args:
-            value: the value to check
-        Returns:
-            true if the value is an age class, false otherwise
-        """
-        if value.upper() in ["MJ", "WJ", "MO", "WO", "MV", "WV", "MSV", "WSV",
-                             "MUV", "WUV"]:
-            result = True
-        else:
-            first_char = value[0]
-            other_char = value[1:]
-            result = False
-
-            if(first_char == 'M') or (first_char == 'W'):
-                if other_char.isdigit():
-                    result = True
-        return result
 
     @staticmethod
     def parse_missed_controls(value):
