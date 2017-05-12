@@ -32,13 +32,14 @@ Data source problems:
 # db.results.find({ 'results.name': 'Bob Smith' }, { 'name': 1 })
 # { "_id" : ObjectId("87y"), "name" : "Night Event at Bowden Houstead" }
 
-import re           # Regular expressions - for parsing the results
-import datetime     # For storing time information
-import scrapy
-from urlparse import urlparse
+import datetime                     # For storing time information
+import scrapy                       # For scraping the web pages
+from urlparse import urlparse       # For determining file type of web page
+import itertools                    # For parsing course results in pre
+from collections import Counter     # For parsing course results in pre
+import math
 
-from Orienteering_Scraper.items import ResultItem, CourseItem, PersonItem, \
-    EventItem, VenueItem, EventSummaryItem
+from Orienteering_Scraper.items import ResultItem, CourseItem, PersonItem, EventItem, VenueItem, EventSummaryItem
 
 
 class NapierSpider(scrapy.Spider):
@@ -52,6 +53,7 @@ class NapierSpider(scrapy.Spider):
 
     # Counters used in end of scraping summary output
     discovered_events_count = 0
+    discovered_courses_count = 0
     processed_events_count = 0
     processed_courses_count = 0
     processed_results_count = 0
@@ -64,7 +66,7 @@ class NapierSpider(scrapy.Spider):
         """
         The main entry into the parsing process, starts at the results list 
         page of an orienteering website and works through the results pages,
-        yeilding to another parser for each event found on these pages.
+        yielding to another parser for each event found on these pages.
 
         Example URL: 
             https://www.southyorkshireorienteers.org.uk/results
@@ -108,8 +110,7 @@ class NapierSpider(scrapy.Spider):
         event['name'] = response.url
 
         # From an event's page, get the link to its results & send for parsing
-        results_url = response.css(
-            'dl.event_info dd.custom4 a::attr(href)').extract_first()
+        results_url = response.css('dl.event_info dd.custom4 a::attr(href)').extract_first()
         if results_url is not None:
             url_path_parts = urlparse(results_url).path.split('.')
             file_type = url_path_parts[-1] if len(url_path_parts) > 1 else None
@@ -191,7 +192,8 @@ class NapierSpider(scrapy.Spider):
     # Other functions ------------------------------------------------------- #
     # ======================================================================= #
 
-    def update_event_results_format(self, event, results_format):
+    @staticmethod
+    def update_event_results_format(event, results_format):
         """
         Updates the result format of an event such that the actual result
         format is not lost when an event is able to be parsed using an
@@ -244,7 +246,7 @@ class NapierSpider(scrapy.Spider):
                        if "Results for " not in course.extract() and
                        "Results software provided by" not in course.extract()]
 
-        return (courses, results)
+        return courses, results
 
     def parse_napier_common(self, response, event):
         (courses, course_results) = NapierSpider.identify_course_data(response, event)
@@ -258,26 +260,33 @@ class NapierSpider(scrapy.Spider):
         event_results = []      # Each result
         processed_courses = []  # A list of all courses for the event
 
+        # Identify the columns by looking at all course results as a whole
+        column_indices = NapierSpider.identify_columns(course_results)
+
         # Iterate over each set of course results e.g. white results
         for course, results in zip(courses, course_results):
             if course.css('p::text').extract_first():
+                self.discovered_courses_count += 1
                 course_info = NapierSpider.parse_course_info(course)
                 parsed_results = NapierSpider.parse_course_results(results,
                                                                    course_info,
                                                                    venue_info,
-                                                                   event_info)
+                                                                   event_info,
+                                                                   column_indices)
+
+                if len(parsed_results) > 0:
+                    self.processed_courses_count += 1
+                    self.processed_results_count += len(parsed_results)
 
                 event_results.extend(parsed_results)
                 processed_courses.append(dict(course_info))
 
-        if (len(event_results) == 0):
+        if len(event_results) == 0:
             event['status'] = (str(event.get('status', "")) +
                                ("**No results detected - " +
                                 "investigate parser**"))
         else:
             self.processed_events_count += 1
-            self.processed_courses_count += len(processed_courses)
-            self.processed_results_count += len(event_results)
             event['status'] = "OK"
 
         event['name'] = event_info['name'] + " at " + venue_info['name']
@@ -337,14 +346,14 @@ class NapierSpider(scrapy.Spider):
     # ======================================================================= #
 
     @staticmethod
-    def parse_course_results(course_results, course_info, venue_info, event_info):
+    def parse_course_results(course_results, course_info, venue_info, event_info, column_indices):
         """
         Takes the raw results for a given course and extracts the results into 
         a list of result objects. 
 
         Rather than splitting each row by spaces, this function finds the 
-        indicies of the common spaces across all rows for a given set of 
-        course results. These indicies are then used to extract the data. 
+        indices of the common spaces across all rows for a given set of 
+        course results. These indices are then used to extract the data. 
 
         Args:
             course_results  the raw course results
@@ -353,19 +362,8 @@ class NapierSpider(scrapy.Spider):
             event_info      a 
         """
 
-        # Extract data to list based on common space indicies
-        course_results = course_results.css('pre::text').extract_first()
-        space_indices = [NapierSpider.find_space_indices(line) for line in course_results.split('\n') if len(line) > 0 and '<i>' not in line and not line.isspace()]
-        max_line_length = max([len(line) for line in course_results.split('\n')])
-        common_space_indices = sorted(list(set([0] + NapierSpider.find_common_space_indices(space_indices) + [max_line_length])))
-        column_indices = NapierSpider.identify_column_indices(common_space_indices)
-        extracted_data = NapierSpider.extract_data(course_results, column_indices)
-
-        # Sanity check
-        max_columns = max([len(x) for x in extracted_data])
-        if max_columns > 6 or max_columns < 5:
-            print "WARNING: Invalid column limit (" + str(max_columns) + ") for " + event_info['name'] + " at " + venue_info['name'] + " on " + event_info['date']
-            return None
+        # Extract data to list based on common space indices
+        extracted_data = NapierSpider.extract_data(NapierSpider.get_valid_rows(course_results), column_indices)
 
         # Process extracted data into list of objects
         parsed_results = []
@@ -381,25 +379,41 @@ class NapierSpider(scrapy.Spider):
         return parsed_results
 
     @staticmethod
+    def get_valid_rows(data):
+        extracted_course_results = "".join(data.css('pre::text').extract())
+        return [line for line in extracted_course_results.split('\n') if len(line) > 0 and '<i>' not in line and not line.isspace()]
+
+    @staticmethod
+    def identify_columns(data):
+        filtered_event_results = NapierSpider.get_valid_rows(data)
+        space_indices = [NapierSpider.find_space_indices(line) for line in filtered_event_results]
+        max_line_length = max([len(line) for line in filtered_event_results])
+        popular_space_indices = sorted(list(set([0] + NapierSpider.find_popular_space_indices(space_indices, len(filtered_event_results)) + [max_line_length])))
+
+        return NapierSpider.identify_column_indices(popular_space_indices)
+
+    @staticmethod
     def find_space_indices(line):
         """
-        Returns a list of the indicies where there is a space in the input line
+        Returns a list of the indices where there is a space in the input line
         """
         return [i for i, x in enumerate(line) if x == ' ']
 
     @staticmethod
-    def find_common_space_indices(space_indices):
+    def find_popular_space_indices(space_indices, course_results_count):
         """
-        Returns a list of common indicies from the input list of lists of 
-        indicies where there are spaces on a given line
+        Returns a list of most popular indices from the input list of lists 
+        of indices where there are spaces on a given line. Popularity is 
+        defined as if more than 90% of the course results have this space. 
         """
-        return sorted(list(reduce((lambda x, y: set(x).intersection(y)), space_indices)))
+        totals = Counter(i for i in list(itertools.chain.from_iterable(space_indices))).most_common()
+        return sorted([x[0] for x in totals if x[1] > int(math.floor(course_results_count * 0.95))])
 
     @staticmethod
     def identify_column_indices(common_space_indices):
         """
-        Returns a list of tuples where each tuple is the bounding indicies 
-        for a given column, identified through common spaces indicies
+        Returns a list of tuples where each tuple is the bounding indices 
+        for a given column, identified through common spaces indices
         """
         pairs = [(x, common_space_indices[i+1]) for i, x in enumerate(common_space_indices) if i < len(common_space_indices) - 1]
         return [x for x in pairs if x[1] - x[0] > 1]
@@ -407,16 +421,15 @@ class NapierSpider(scrapy.Spider):
     @staticmethod
     def extract_data(data, column_indices):
         """
-        Uses the supplied list of column indicies to split the raw course
+        Uses the supplied list of column indices to split the raw course
         result data into a list of list
         """
         parsed_data = []
-        for line in data.split('\n'):
-            if len(line) > 0 and '<i>' not in line:
-                parsed_line = []
-                for column in column_indices:
-                    parsed_line += [line[column[0]:column[1]].strip()]
-                parsed_data.append(parsed_line)
+        for line in data:
+            parsed_line = []
+            for column in column_indices:
+                parsed_line += [line[column[0]:column[1]].strip()]
+            parsed_data.append(parsed_line)
         return parsed_data
 
     @staticmethod
@@ -429,7 +442,7 @@ class NapierSpider(scrapy.Spider):
             row: the row to analyse
         """
         person = PersonItem()
-        result = ResultItem() 
+        result = ResultItem()
 
         # Position
         raw_position = input_row[0].rstrip('=;')
@@ -440,7 +453,7 @@ class NapierSpider(scrapy.Spider):
 
         # Name
         person['name'] = input_row[1]
-        
+
         # Club
         person['club'] = input_row[2]
 
@@ -498,16 +511,22 @@ class NapierSpider(scrapy.Spider):
             .format(int((self.processed_events_count /
                     float(self.discovered_events_count)) * 100),
                     self.processed_events_count, self.discovered_events_count)
-        
-        print "{:d} results found over {:d} courses"\
+
+        print "{:d}% of courses processed ({:d} of {:d})" \
+            .format(int((self.processed_courses_count /
+                         float(self.discovered_courses_count)) * 100),
+                    self.processed_courses_count, self.discovered_courses_count)
+
+        print "{:d} results found over {:d} processed courses of {:d} processed events)"\
             .format(int(self.processed_results_count), 
-                int(self.processed_courses_count))
+                    int(self.processed_courses_count),
+                    int(self.processed_events_count))
 
     @staticmethod
     def printSummary(event):
         """
         event is of type Item and because courses could be empty, the .get method 
-        with a default value is neede instead of event['courses']
+        with a default value is needed instead of event['courses']
         """
         print "/" + ("=" * 163) + "\\"
         print "| {0:<4} {1:<156} |".format(str(event['seq_id']) + ")", event['name'])
