@@ -18,7 +18,6 @@ TODOs:
 Data source problems:
  - Sometimes there can be no space between name and club e.g. https://www.southyorkshireorienteers.org.uk/event/2017-04-29-parkwood-springs/results_v2.htm
  - Some events have mixed courses (e.g. score and normal...) https://www.southyorkshireorienteers.org.uk/event/2016-12-03-Christmas-event/results.htm
-   - These are parsed, but the status is being set to the score value, normally the time column
 
 @author: abradbury
 """
@@ -444,15 +443,16 @@ class NapierSpider(scrapy.Spider):
         TODO: Separate person and result item parsing into two methods
 
         Args:
-            row: the row to analyse
+            :param input_row: a result from a course as a list of column elements
         """
         person = PersonItem()
         result = ResultItem()
 
         # Position
-        raw_position = input_row[0].rstrip('=;')
+        raw_position = input_row[0].rstrip('=;').strip()
         if raw_position.isdigit():
             result['status'] = 'ok'
+            result['position'] = raw_position
         else:
             result['status'] = raw_position
 
