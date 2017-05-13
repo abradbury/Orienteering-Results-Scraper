@@ -18,6 +18,7 @@ TODOs:
 Data source problems:
  - Sometimes there can be no space between name and club e.g. https://www.southyorkshireorienteers.org.uk/event/2017-04-29-parkwood-springs/results_v2.htm
  - Some events have mixed courses (e.g. score and normal...) https://www.southyorkshireorienteers.org.uk/event/2016-12-03-Christmas-event/results.htm
+   - These are parsed, but the status is being set to the score value, normally the time column
 
 @author: abradbury
 """
@@ -381,7 +382,11 @@ class NapierSpider(scrapy.Spider):
     @staticmethod
     def get_valid_rows(data):
         extracted_course_results = "".join(data.css('pre::text').extract())
-        return [line for line in extracted_course_results.split('\n') if len(line) > 0 and '<i>' not in line and not line.isspace()]
+        return [line for line in extracted_course_results.split('\n')
+                if len(line) > 0 and
+                '<i>' not in line and
+                not line.isspace() and
+                (' and ' not in line and '&' not in line and '+' not in line and '/' not in line)]
 
     @staticmethod
     def identify_columns(data):
