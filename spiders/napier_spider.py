@@ -474,34 +474,48 @@ class NapierSpider(scrapy.Spider):
             minutes = full_minutes % 60
             seconds = int(time_parts[1])
             result['time'] = datetime.time(hours, minutes, seconds).isoformat()
-        else:
+        elif raw_time.isalpha():
             result['status'] = raw_time
 
         # Comments
-        # NapierSpider.parse_missed_controls(input_row[5])
+        raw_comments = input_row[5]
+        if len(raw_comments) > 0 and not raw_comments.isspace():
+            NapierSpider.parse_comments(input_row[5], result)
 
         person['result'] = dict(result)
         return person
 
     @staticmethod
-    def parse_missed_controls(value):
+    def parse_comments(raw_comments, result):
         """
-        Parses the missed controls numbers from a string such as '1,4-6' to
-        return a list of missed control numbers as integers e.g. [1,4,5,6].
+        Parses final column of data that contains comments. One example that it parses the missed controls numbers 
+        from a string such as '1,4-6' to return a list of missed control numbers as integers e.g. [1,4,5,6].
+        """
+        split_comments = raw_comments.lower().split(';')
 
-        Args:
-            value: the missed controls to parse
-        Returns:
-            a list containing the missed controls
-        """
-        missing = []
-        for group in value.replace(";", "").split(','):
-            split_group = group.split('-')
-            if len(split_group) > 1:
-                missing += range(int(split_group[0]), int(split_group[1]) + 1)
+        for comment in split_comments:
+            if "out of order" in comment:
+                result['out_of_order'] = int(comment.split("out of order")[0].strip().split()[-1])
+
+            elif "missing" in comment:
+                missing_numbers_raw = comment.strip().split(' ')[-1]
+                missing_numbers_processed = []
+                for group in missing_numbers_raw.split(','):
+                    split_group = group.split('-')
+                    if len(split_group) > 1:
+                        missing_numbers_processed += range(int(split_group[0]), int(split_group[1]) + 1)
+                    else:
+                        missing_numbers_processed += [int(split_group[0])]
+
+                result['missed'] = missing_numbers_processed
+
+            elif "no finish time" in comment:
+                # Nothing needs to be done as 'dnf' would be in the time field in this case and a prior part of the
+                # code would have detected the 'dnf' and set the result status field accordingly
+                pass
+
             else:
-                missing += [int(split_group[0])]
-        return missing
+                print "Unknown comment: " + str(comment)
 
     # ======================================================================= #
     # Miscellaneous functions  ---------------------------------------------- #
