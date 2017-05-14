@@ -142,7 +142,7 @@ class NapierSpider(scrapy.Spider):
         """
 
         event = response.meta['event_object']
-        results_format = self.identify_results_page(response)
+        results_format = NapierSpider.identify_results_page(response)
 
         if "Napier - Colour" in results_format:
             self.update_event_results_format(event, "Napier - Colour")
@@ -231,22 +231,26 @@ class NapierSpider(scrapy.Spider):
 
     @staticmethod
     def identify_course_data(response, event):
-        # TODO: Ignore score courses that can be mixed up in the results
+        # Identify the non-score courses by selecting those links that have the name attribute not set to TOP
+        # Score courses are excluded by their presence of the 'limit' and 'penalty' words
+        # XPath selectors have to be used instead of CSS selectors to search the text for score course words
+        courses = response.xpath("//a[@name][@name != 'TOP']")
+        filtered_courses = results = response.\
+            xpath("//a[@name][@name != 'TOP'][not(contains(., 'limit')) and not(contains(., 'penalty'))]")
 
-        # Select all the links that have an attribute 'name' - course headers
-        # Change the below to //a name = xxx to get course & competitor info
-        courses = results = response.css('a:not([name=TOP])[name]')
+        if len(courses) != len(filtered_courses):
+            event['results_format'] += (" (" + str(len(courses) - len(filtered_courses)) + " score course(s) ignored)")
 
         # If no courses found, assume simple Napier format (no links)
-        if len(courses) == 0:
+        if len(filtered_courses) == 0:
             event['results_format'] += " (simple)"
             courses = response.css('p')
             results = response.css('pre')
-            courses = [course for course in courses
-                       if "Results for " not in course.extract() and
-                       "Results software provided by" not in course.extract()]
+            filtered_courses = [course for course in courses
+                                if "Results for " not in course.extract() and
+                                "Results software provided by" not in course.extract()]
 
-        return courses, results
+        return filtered_courses, results
 
     def parse_napier_common(self, response, event):
         (courses, course_results) = NapierSpider.identify_course_data(response, event)
@@ -478,9 +482,10 @@ class NapierSpider(scrapy.Spider):
             result['status'] = raw_time
 
         # Comments
-        raw_comments = input_row[5]
-        if len(raw_comments) > 0 and not raw_comments.isspace():
-            NapierSpider.parse_comments(input_row[5], result)
+        if len(input_row) > 5:
+            raw_comments = input_row[5]
+            if len(raw_comments) > 0 and not raw_comments.isspace():
+                NapierSpider.parse_comments(input_row[5], result)
 
         person['result'] = dict(result)
         return person
