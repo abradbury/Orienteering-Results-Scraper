@@ -28,6 +28,45 @@ Data source problems:
 # Event Page            https://www.southyorkshireorienteers.org.uk/events/event/642-outdoor-city-weekender-middle-distance-race
 # Event Results Page    https://www.southyorkshireorienteers.org.uk/event/2017-01-22-big-moor/index.htm
 
+
+# Relay events:
+#   https://www.southyorkshireorienteers.org.uk/events/event/600-trial-british-mixed-sprint-relay-championships
+
+
+# Unknown events, but actually colour:
+#   https://www.southyorkshireorienteers.org.uk/event/2016-06-25-weston-park/results_v1.htm
+
+
+# MERCS class & course:
+#   https://www.southyorkshireorienteers.org.uk/event/2016-06-05-don-valley/index.htm
+#   https://www.southyorkshireorienteers.org.uk/event/2015-05-02-ponderosa/index.htm
+#   https://www.southyorkshireorienteers.org.uk/events/event/487-warncliffe-yhoa-superleague
+#   https://www.southyorkshireorienteers.org.uk/event/2014-04-05-parkwood-springs/index.htm
+#   https://www.southyorkshireorienteers.org.uk/event/2015-03-01-cawthorne-woods/index.htm
+
+# colourResults Table:
+#   https://www.southyorkshireorienteers.org.uk/event/2015-05-16-millhouses-park/results_v4.html
+#   https://www.southyorkshireorienteers.org.uk/event/2015-04-25-concord-park/results_v2.html
+#   https://www.southyorkshireorienteers.org.uk/event/2014-10-18-weston-park/results_v3.html
+#   https://www.southyorkshireorienteers.org.uk/event/2014-02-22-forge-dam/results_v2.htm
+#   https://www.southyorkshireorienteers.org.uk/event/2014-05-08-tankersley-wood/results_v3.html
+#   https://www.southyorkshireorienteers.org.uk/event/2014-05-17-norfolk-park/results_v1.htm
+#   https://www.southyorkshireorienteers.org.uk/event/2015-01-17-botanical-gardens/results_v4.html
+#   https://www.southyorkshireorienteers.org.uk/event/2015-06-20-graves-park/results_v4.html
+
+# Missing column
+#   https://www.southyorkshireorienteers.org.uk/event/2014-10-09-edge/results.htm (due to brackets in name - exclude?)
+#
+
+# Splits only
+#   https://www.southyorkshireorienteers.org.uk/event/2013-10-12-rivelin-valley/results_v1.htm
+
+# Crystal Reports
+#   https://www.southyorkshireorienteers.org.uk/event/2013-11-30-loxley-common/results_v1.html
+
+# Error:
+#   https://www.southyorkshireorienteers.org.uk/event/2014-06-18-wheata-woods/results_v2.htm
+
 # Useful MongoDB queries:
 # db.results.find({ 'results.name': 'Bob Smith' }, { 'name': 1 })
 # { "_id" : ObjectId("87y"), "name" : "Night Event at Bowden Houstead" }
@@ -58,6 +97,9 @@ class NapierSpider(scrapy.Spider):
     processed_courses_count = 0
     processed_results_count = 0
 
+    page_limit = 5
+    page_counter = 0
+
     # ======================================================================= #
     # Page parsers ---------------------------------------------------------- #
     # ======================================================================= #
@@ -72,6 +114,9 @@ class NapierSpider(scrapy.Spider):
             https://www.southyorkshireorienteers.org.uk/results
         """
 
+        if self.page_counter > self.page_limit:
+            exit()
+
         # Process each event on the current results page
         events = response.css(
             'table.eventtable tr td[headers=jem_title] a::attr(href)')\
@@ -85,12 +130,11 @@ class NapierSpider(scrapy.Spider):
                                  callback=self.parse_event_page)
 
         # Parse the next results page
-        # next_page = response\
-        #     .css('nav ul.pagination li a[title=Next]::attr(href)')\
-        #     .extract_first()
-        # if next_page is not None:
-        #     next_page = response.urljoin(next_page)
-        #     yield scrapy.Request(next_page, callback=self.parse)
+        next_page = response.css('nav ul.pagination li a[title=Next]::attr(href)').extract_first()
+        if next_page is not None:
+            self.page_counter += 1
+            next_page = response.urljoin(next_page)
+            yield scrapy.Request(next_page, callback=self.parse)
 
     def parse_event_page(self, response):
         """
@@ -217,6 +261,7 @@ class NapierSpider(scrapy.Spider):
         mercs_raw = response.css('address p a::text')
         stephan_raw = response.css('table tr td small a::text')
         cocoa_raw = response.css('head meta[name=Generator]::attr(content)')
+        tryner = response.css('div#colourResults')
 
         if napier_raw and "Napier" in napier_raw.extract_first():
             return "Napier - Colour"
@@ -226,8 +271,26 @@ class NapierSpider(scrapy.Spider):
             return "Stephan"
         elif cocoa_raw and "Cocoa" in cocoa_raw.extract_first():
             return "Cocoa"
+        elif tryner:
+            return "Tryner/ColourResults"
         else:
             return "--Unknown--"
+
+
+
+
+
+
+
+
+        # TODO: Change returned JSON such that each document/element is a runner and within that contains event and course information
+
+
+
+
+
+
+
 
     @staticmethod
     def identify_course_data(response, event):
