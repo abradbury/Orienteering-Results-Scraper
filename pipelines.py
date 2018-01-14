@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 #
 # To ignore missing docstrings:
 #     pylint: disable=C0111
