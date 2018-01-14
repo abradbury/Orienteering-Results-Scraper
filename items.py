@@ -59,3 +59,9 @@ class EventItem(Item):
     category = Field()
     date = Field()
     url = Field()
+
+class ClubItem(Item):
+    name = Field()
+    fullName = Field()
+    association = Field()
+    website = Field()
