@@ -25,10 +25,10 @@ ITEM_PIPELINES = {
 MONGO_DATABASE = 'Orienteering'
 MONGO_URI = 'mongodb://localhost:27017'
 
-LOG_LEVEL = 'ERROR'
+LOG_LEVEL = 'DEBUG'
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
-#USER_AGENT = 'Orienteering_Scraper (+http://www.yourdomain.com)'
+USER_AGENT = 'OrienteeringScraper/0.8 (+https://github.com/abradbury)'
 
 # Configure maximum concurrent requests performed by Scrapy (default: 16)
 #CONCURRENT_REQUESTS=32
