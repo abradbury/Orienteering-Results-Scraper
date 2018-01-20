@@ -65,3 +65,4 @@ class ClubItem(Item):
     fullName = Field()
     association = Field()
     website = Field()
+    image_urls = Field()    # A list of images to be downloaded

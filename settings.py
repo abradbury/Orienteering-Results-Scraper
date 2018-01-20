@@ -19,11 +19,14 @@ SPIDER_MODULES = ['Orienteering_Scraper.spiders']
 NEWSPIDER_MODULE = 'Orienteering_Scraper.spiders'
 
 ITEM_PIPELINES = {
+    'scrapy.pipelines.images.ImagesPipeline': 1,
     'Orienteering_Scraper.pipelines.MongoPipeline': 300
 }
 
 MONGO_DATABASE = 'Orienteering'
 MONGO_URI = 'mongodb://localhost:27017'
+
+IMAGES_STORE = './' # TODO: Liaise with the JS app to determine location
 
 LOG_LEVEL = 'DEBUG'
 

@@ -71,6 +71,13 @@ class OrienteeringClubsSpider(scrapy.Spider):
         """
 
         club = response.meta['club']
+
+        self.parse_club_full_name(response, club)
+        self.parse_club_logo(response, club)
+
+        yield club
+
+    def parse_club_full_name(self, response, club):
         raw_full_name = response.css('head title::text').extract_first()
 
         if raw_full_name:
@@ -85,4 +92,14 @@ class OrienteeringClubsSpider(scrapy.Spider):
             if parsed_full_name.upper() != club['name'].upper():
                 club['fullName'] = parsed_full_name
 
-        yield club
+    def parse_club_logo(self, response, club):
+        # if "facebook" in response.url:
+        # If Facebook in URL, then get img src inside a element with aria-label = Profile picture
+        # But don't seem to be getting same result from scraping as from browsing...
+
+        # TODO: Perhaps have a custom image pipeline that only leaves elements in the item if the 
+        # image is actually present - and also stores the path and the image, not the url
+        if "facebook" not in response.url:
+            club["image_urls"] = [response.urljoin("apple-touch-icon.png")]
+
+        return club
