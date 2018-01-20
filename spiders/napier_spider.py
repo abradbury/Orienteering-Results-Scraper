@@ -106,11 +106,11 @@ class NapierSpider(scrapy.Spider):
 
     def parse(self, response):
         """
-        The main entry into the parsing process, starts at the results list 
+        The main entry into the parsing process, starts at the results list
         page of an orienteering website and works through the results pages,
         yielding to another parser for each event found on these pages.
 
-        Example URL: 
+        Example URL:
             https://www.southyorkshireorienteers.org.uk/results
         """
 
@@ -123,7 +123,7 @@ class NapierSpider(scrapy.Spider):
             .extract()
 
         if len(events) == 0:
-            print "Error - no events found on " + response.url
+            print("Error - no events found on " + response.url)
 
         for event in events:
             yield scrapy.Request(response.urljoin(event),
@@ -139,7 +139,7 @@ class NapierSpider(scrapy.Spider):
     def parse_event_page(self, response):
         """
         Parses a single event page on the orienteering website to identify the
-        link to the event results page. Currently, only local event result 
+        link to the event results page. Currently, only local event result
         pages are parsed.
 
         Args:
@@ -166,15 +166,15 @@ class NapierSpider(scrapy.Spider):
                                          callback=self.parse_event_results_page)
                 else:
                     event['status'] = str(file_type.upper()) + " not supported"
-                    NapierSpider.printSummary(event)
+                    NapierSpider.print_summary(event)
                     yield event
             else:
                 event['status'] = "Not following external link '" + results_url + "'"
-                NapierSpider.printSummary(event)
+                NapierSpider.print_summary(event)
                 yield event
         else:
             event['status'] = "No results link found"
-            NapierSpider.printSummary(event)
+            NapierSpider.print_summary(event)
             yield event
 
     def parse_event_results_page(self, response):
@@ -198,19 +198,19 @@ class NapierSpider(scrapy.Spider):
             if "Relay" in text or "relay" in text:
                 self.update_event_results_format(event, "MERCS relay")
                 event['status'] = "MERCS relay events not supported"
-                NapierSpider.printSummary(event)
+                NapierSpider.print_summary(event)
                 yield event
 
             # elif ???
             #     self.update_event_results_format(event, "MERCS multi-day")
             #     event['status'] = "MERCS multi-day events not supported"
-            #     NapierSpider.printSummary(event)
+            #     NapierSpider.print_summary(event)
             #     yield event
 
             # elif ???
             #     self.update_event_results_format(event, "MERCS class-split")
             #     event['status'] = "MERCS class-split events not supported"
-            #     NapierSpider.printSummary(event)
+            #     NapierSpider.print_summary(event)
             #     yield event
 
             else:
@@ -224,12 +224,12 @@ class NapierSpider(scrapy.Spider):
                                          callback=self.parse_event_results_page)
                 else:
                     event['status'] = "MERCS no results link found"
-                    NapierSpider.printSummary(event)
+                    NapierSpider.print_summary(event)
                     yield event
         else:
             event['status'] = "Unsupported results format: " + results_format
             self.update_event_results_format(event, results_format)
-            NapierSpider.printSummary(event)
+            NapierSpider.print_summary(event)
             yield event
 
     # ======================================================================= #
@@ -359,7 +359,7 @@ class NapierSpider(scrapy.Spider):
         event['name'] = event_info['name'] + " at " + venue_info['name']
         event['results'] = event_results
         event['courses'] = processed_courses
-        NapierSpider.printSummary(event)
+        NapierSpider.print_summary(event)
 
         return event
 
@@ -583,7 +583,7 @@ class NapierSpider(scrapy.Spider):
                 pass
 
             else:
-                print "Unknown comment: " + str(comment)
+                print("Unknown comment: " + str(comment))
 
     # ======================================================================= #
     # Miscellaneous functions  ---------------------------------------------- #
@@ -594,33 +594,33 @@ class NapierSpider(scrapy.Spider):
         Called when the Scrapy crawler has completed and it being closed down
         """
 
-        print "{:d}% of events processed ({:d} of {:d})"\
+        print("{:d}% of events processed ({:d} of {:d})"\
             .format(int((self.processed_events_count /
                     float(self.discovered_events_count)) * 100),
-                    self.processed_events_count, self.discovered_events_count)
+                    self.processed_events_count, self.discovered_events_count))
 
-        print "{:d}% of courses processed ({:d} of {:d})" \
+        print("{:d}% of courses processed ({:d} of {:d})" \
             .format(int((self.processed_courses_count /
                          float(self.discovered_courses_count)) * 100),
-                    self.processed_courses_count, self.discovered_courses_count)
+                    self.processed_courses_count, self.discovered_courses_count))
 
-        print "{:d} results found over {:d} processed courses of {:d} processed events)"\
+        print("{:d} results found over {:d} processed courses of {:d} processed events)"\
             .format(int(self.processed_results_count), 
                     int(self.processed_courses_count),
-                    int(self.processed_events_count))
+                    int(self.processed_events_count)))
 
     @staticmethod
-    def printSummary(event):
+    def print_summary(event):
         """
-        event is of type Item and because courses could be empty, the .get method 
+        event is of type Item and because courses could be empty, the .get method
         with a default value is needed instead of event['courses']
         """
-        print "/" + ("=" * 163) + "\\"
-        print "| {0:<4} {1:<156} |".format(str(event['seq_id']) + ")", event['name'])
-        print "| " + ("-" * 162) + "|"
-        print "| {0:<10} {1:<150} |".format("Status:", event.get("status", ""))
-        print "| {0:<10} {1:<150} |".format("Format:", event.get("results_format", ""))
-        print "| {0:<10} {1:<150} |".format("Courses:", len(event.get("courses", "")))
-        print "| {0:<10} {1:<150} |".format("Results:", len(event.get("results", "")))
-        print "\\" + ("=" * 163) + "/"
-        print ""
+        print("/" + ("=" * 163) + "\\")
+        print("| {0:<4} {1:<156} |".format(str(event['seq_id']) + ")", event['name']))
+        print("| " + ("-" * 162) + "|")
+        print("| {0:<10} {1:<150} |".format("Status:", event.get("status", "")))
+        print("| {0:<10} {1:<150} |".format("Format:", event.get("results_format", "")))
+        print("| {0:<10} {1:<150} |".format("Courses:", len(event.get("courses", ""))))
+        print("| {0:<10} {1:<150} |".format("Results:", len(event.get("results", ""))))
+        print("\\" + ("=" * 163) + "/")
+        print("")
